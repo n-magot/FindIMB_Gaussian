@@ -29,7 +29,7 @@ Under this prior every correlation is uniform a priori and each variable's preci
 - **Step 1** prints:
   - every scored covariate set ranked by `log p(Y | Z)`, with its normalized weight (the top set is the Markov boundary);
 
-  - **Step 2** prints, for every set `Z`:
+- **Step 2** prints, for every set `Z`:
   - the log scores of `H^c` and `H^cbar`;
   - their posterior probabilities;
   - the total posterior probability of pooling;
