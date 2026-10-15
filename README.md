@@ -25,10 +25,9 @@ Under this prior every correlation is uniform a priori (Barnard, McCulloch & Men
 
 - **Step 1** prints:
   - every scored covariate set ranked by `log p(Y | Z)`, with its normalized weight (the top set is the Markov boundary);
-  - an optional OLS cross-check.
+
 - **Step 2** prints, for every set `Z`:
-  - the log scores of `H^c` and `H^cbar`;
-  - their posterior probabilities;
+  - the log scores of `H^c` and `H^cbar` and their posterior probabilities;
   - the total posterior probability of pooling;
   - the most probable set to pool on.
 
