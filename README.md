@@ -16,10 +16,10 @@ Python code for FindIMB (Triantafillou, Jabbari & Cooper, 2021) with a continuou
 The variables are standardized, and the prior is the weakly informative Normal–Wishart
 
 ```
-nu = 0,  a_mu = 1,  a_w = n + 1,  T = 2 I
+nu = 0,  a_mu = 1,  a_w = n + 2,  T = (1/2) I
 ```
 
-Under this prior every correlation is uniform a priori (Barnard, McCulloch & Meng, 2000), and each variable's precision has prior mean 1. The values can be changed in the config block of each file.
+This is the standard weak BGe prior (Kuipers, Moffa & Heckerman, 2014, supplement Eq. B.6; the `bnlearn` defaults `iss.mu = 1`, `iss.w = ncol + 2`). It is centred on independence and on the scale of the standardized data, with `t = a_mu (a_w − n − 1) / (a_mu + 1) = 1/2` and the smallest integer prior sample sizes for which this calibration holds. It plays the role of the weak Dirichlet prior `a_jk = 1` of the discrete version, though it is derived from one joint prior rather than set per conditional. The alternative `a_w = n + 1`, `T = 2 I` is reported in the sensitivity analysis. The values can be changed in the config block of each file.
 
 ## Output
 
@@ -36,7 +36,6 @@ Under this prior every correlation is uniform a priori (Barnard, McCulloch & Men
 Both scripts return the results table as a pandas DataFrame.
 ## References
 
-- Barnard, J., McCulloch, R. and Meng, X.-L. (2000). Modeling covariance matrices in terms of standard deviations and correlations, with application to shrinkage. *Statistica Sinica* 10, 1281–1311.
 - Geiger, D. and Heckerman, D. (1994). Learning Gaussian networks. In *Proceedings of UAI*.
 - Kuipers, J., Moffa, G. and Heckerman, D. (2014). Addendum on the scoring of Gaussian directed acyclic graphical models. *The Annals of Statistics* 42, 1689–1691.
 - Triantafillou, S., Jabbari, F. and Cooper, G. F. (2021). Causal Markov boundaries. In *Proceedings of UAI*, PMLR 161.
