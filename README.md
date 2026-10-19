@@ -2,6 +2,10 @@
 
 Python code for FindIMB (Triantafillou, Jabbari & Cooper, 2021) with a continuous outcome. The Dirichlet (BDe) scores of the discrete version are replaced by closed-form Normal–Wishart (BGe) scores (Geiger & Heckerman, 1994; Kuipers, Moffa & Heckerman, 2014).
 
+## Assumptions
+
+The BGe score assumes that all variables (outcome, treatment and covariates) are jointly Gaussian, and that the rows are i.i.d. draws from this distribution (each row is one independent case). Binary and categorical variables satisfy this only approximately. What the scores use is that `Y`, given the treatment and the covariate set, follows a linear model with Gaussian noise of constant variance. The treatment and covariates enter only as regressors.
+
 ## Files
 
 - **`Find_MarkovBoundary.py`**: finds the Markov boundary of the outcome `Y` in the observational data.
