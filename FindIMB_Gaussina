@@ -35,16 +35,28 @@ BGe assumes all variables (outcome and covariates) are jointly Gaussian.
 
 THE PRIOR (weakly informative Normal-Wishart)
 ---------------------------------------------
-All columns are standardized with the POOLED (D_o u D_e) mean and sd, so
-both datasets share one scale. With n = total number of columns (Y, X and
-every MB covariate column, each dummy counted once):
+All columns are standardized with the OBSERVATIONAL (D_o) mean and sd, and
+the SAME transformation is applied to D_e. A common affine transformation
+preserves P(Y | X, Z), which H_Z^c assumes equal across D_o and D_e; a
+separate transformation of D_e would not, because the intervention changes
+the distribution of X. With n = total number of columns (Y, X and every MB
+covariate column, each dummy counted once):
 
     mu | W ~ N(nu, (a_mu W)^{-1}),   W ~ Wishart(a_w, T)
-    nu = 0,  a_mu = 1,  a_w = n + 1,  T = t I,  t = 2.
+    nu = 0,  a_mu = 1,  a_w = n + 2,  T = t I,  t = 1/2.
 
-a_w = n + 1 makes every marginal correlation uniform on (-1, 1) (Barnard,
-McCulloch & Meng 2000, Sec. 2.2); t = 2 gives each variable prior mean
-precision E[1/Sigma_ii] = 2/t = 1, the precision of standardized data.
+This is the standard weak BGe prior (Kuipers, Moffa & Heckerman 2014,
+supplement Eq. B.6; the bnlearn defaults iss.mu = 1, iss.w = ncol + 2).
+It is centred on independence and on the scale of the standardized data:
+t = a_mu (a_w - n - 1) / (a_mu + 1) = 1/2, the smallest integer prior sample
+sizes (a_mu = 1, a_w = n + 2) for which this calibration holds. It plays the
+role of the weak Dirichlet prior a_jk = 1 of Triantafillou et al. (2021),
+though it is derived from one joint prior rather than set per conditional.
+The alternative a_w = n + 1, t = 2 is reported in the sensitivity analysis.
+
+nu = 0 is the D_o mean for EVERY dataset (not re-centred on the data being
+scored, as bnlearn does by default): re-centring would use D_e's own mean
+under H_Z^cbar and erase the mean shift the H_Z^c test is meant to detect.
 """
 
 import itertools
@@ -86,8 +98,8 @@ BINARY_POSITIVE = {}
 
 # --- BGe hyperparameters (Normal-Wishart) ---
 A_MU = 1.0            # alpha_mu > 0
-A_W  = None           # alpha_w > n-1; None -> n + 1 (uniform marginal correlations)
-T_SCALE = None        # None -> t = 2 (prior mean precision 1 for each variable)
+A_W  = None           # alpha_w > n-1; None -> n + 2 (standard weak BGe, KMH 2014)
+T_SCALE = None        # None -> t = 1/2 (KMH supp Eq. B.6; bnlearn default)
 
 # --- hypotheses ---
 P_HC = 0.5            # prior mass on H^c (spread uniformly over Z); H^cbar gets 1 - P_HC
@@ -149,19 +161,27 @@ def build_data(df_o, df_e, df_test=None):
     """
     Returns standardized matrices D_o, D_e (and D_test), the column layout
     `cols` (group name -> column indices; "__Y__" and "__X__" for the outcome
-    and treatment) and the outcome back-transform. Standardization constants
-    and the log1p decision use D_o and D_e only.
+    and treatment) and the outcome back-transform.
+
+    Standardization constants (mean, sd) and the log1p decision use D_o ONLY,
+    and the same transformation is applied to D_e and the test set. H_Z^c
+    assumes P(Y | X, Z) is the same in D_o and D_e, which a common affine
+    transformation preserves; estimating the transformation on D_e too, or
+    pooling, would partly absorb a genuine shift and weaken the invariance
+    test. Encoding conventions (reference levels, the "positive" binary value)
+    are read from the pooled frame -- they are label choices, not leakage.
     """
+    N_o = len(df_o)
     n_train = len(df_o) + len(df_e)
     parts = [df_o, df_e] + ([df_test] if df_test is not None else [])
     pooled = pd.concat(parts, ignore_index=True)
 
-    # outcome: skew check -> log1p if strongly right-skewed
+    # outcome: skew check on D_o only -> log1p if strongly right-skewed
     y_raw = pooled[OUTCOME_COL].astype(float)
-    y_train = y_raw.iloc[:n_train]
-    log_y = bool(y_train.skew() > 1.0 and (y_raw >= 0).all())
+    y_obs = y_raw.iloc[:N_o]
+    log_y = bool(y_obs.skew() > 1.0 and (y_raw >= 0).all())
     if log_y:
-        print(f"NOTE: outcome skew = {y_train.skew():.2f} > 1 -> applying log1p.")
+        print(f"NOTE: D_o outcome skew = {y_obs.skew():.2f} > 1 -> applying log1p.")
     y = np.log1p(y_raw.values) if log_y else y_raw.values
 
     blocks = [("__Y__", y.reshape(-1, 1)),
@@ -174,8 +194,8 @@ def build_data(df_o, df_e, df_test=None):
         blocks.append((col, encode_group(pooled, col, "continuous")))
 
     raw = np.hstack([b for _, b in blocks])
-    mean = raw[:n_train].mean(axis=0)
-    sd = raw[:n_train].std(axis=0, ddof=0)
+    mean = raw[:N_o].mean(axis=0)          # D_o-only standardization
+    sd = raw[:N_o].std(axis=0, ddof=0)
     sd[sd == 0] = 1.0
     Z = (raw - mean) / sd
 
@@ -184,7 +204,6 @@ def build_data(df_o, df_e, df_test=None):
         cols[name] = list(range(c, c + b.shape[1]))
         c += b.shape[1]
 
-    N_o = len(df_o)
     y_transform = {"mean": mean[0], "sd": sd[0], "log1p": log_y}
     D_test = Z[n_train:] if df_test is not None else None
     return Z[:N_o], Z[N_o:n_train], cols, y_transform, D_test
@@ -195,14 +214,20 @@ def build_data(df_o, df_e, df_test=None):
 # ===========================================================================
 
 def default_hyperparams(n, a_mu=A_MU, a_w=A_W, t_scale=T_SCALE):
-    """Default Normal-Wishart prior on n variables: a_w = n + 1, T = 2 I."""
+    """Standard weak BGe prior on n variables: a_w = n + 2, T = (1/2) I
+    (Kuipers, Moffa & Heckerman 2014, supplement Eq. B.6; bnlearn defaults)."""
     if a_w is None:
-        a_w = n + 1                       # uniform marginal correlations [BMM2000]
+        a_w = n + 2                       # standard weak BGe choice
     if a_w <= n - 1:
         raise ValueError(f"a_w must exceed n-1 = {n-1}; got {a_w}")
     nu = np.zeros(n)
     if t_scale is None:
-        t_scale = 2.0                     # E[1/Sigma_ii] = 2/t = 1
+        # t = a_mu (a_w - n - 1) / (a_mu + 1); with a_mu=1, a_w=n+2 -> t = 1/2
+        t_scale = a_mu * (a_w - n - 1) / (a_mu + 1)
+    if t_scale <= 0:
+        raise ValueError(
+            f"t_scale must be > 0; the calibration t = a_mu(a_w-n-1)/(a_mu+1) "
+            f"gives t <= 0 for a_w = {a_w}, a_mu = {a_mu}. Need a_w > n + 1.")
     T = t_scale * np.eye(n)
     return T, nu, a_mu, a_w
 
