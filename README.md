@@ -19,7 +19,7 @@ The variables are standardized, and the prior is the weakly informative Normal�
 nu = 0,  a_mu = 1,  a_w = n + 2,  T = (1/2) I
 ```
 
-This is the standard weak BGe prior (Kuipers, Moffa & Heckerman, 2014, supplement Eq. B.6; the `bnlearn` defaults `iss.mu = 1`, `iss.w = ncol + 2`). It is centred on independence and on the scale of the standardized data, with `t = a_mu (a_w − n − 1) / (a_mu + 1) = 1/2` and the smallest integer prior sample sizes for which this calibration holds. It plays the role of the weak Dirichlet prior `a_jk = 1` of the discrete version, though it is derived from one joint prior rather than set per conditional. The alternative `a_w = n + 1`, `T = 2 I` is reported in the sensitivity analysis. The values can be changed in the config block of each file.
+This is the standard weak BGe prior (Kuipers, Moffa & Heckerman, 2014, supplement Eq. B.6). It is centred on independence and on the scale of the standardized data, with `t = a_mu (a_w − n − 1) / (a_mu + 1) = 1/2` and the smallest integer prior sample sizes for which this calibration holds. It plays the role of the weak Dirichlet prior `a_jk = 1` of the discrete version, though it is derived from one joint prior rather than set per conditional. The alternative `a_w = n + 1`, `T = 2 I` is reported in the sensitivity analysis. The values can be changed in the config block of each file.
 
 ## Output
 
