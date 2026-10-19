@@ -27,11 +27,16 @@ All columns are standardized (mean 0, sd 1). With n = total number of
 columns (Y plus every covariate column, each dummy counted once):
 
     mu | W ~ N(nu, (a_mu W)^{-1}),   W ~ Wishart(a_w, T)
-    nu = 0,  a_mu = 1,  a_w = n + 1,  T = t I,  t = 2.
+    nu = 0,  a_mu = 1,  a_w = n + 2,  T = t I,  t = 1/2.
 
-a_w = n + 1 makes every marginal correlation uniform on (-1, 1) (Barnard,
-McCulloch & Meng 2000, Sec. 2.2); t = 2 gives each variable prior mean
-precision E[1/Sigma_ii] = 2/t = 1, the precision of standardized data.
+This is the standard weak BGe prior (Kuipers, Moffa & Heckerman 2014,
+supplement Eq. B.6; the bnlearn defaults iss.mu = 1, iss.w = ncol + 2).
+It is centred on independence and on the scale of the standardized data:
+t = a_mu (a_w - n - 1) / (a_mu + 1) = 1/2, the smallest integer prior sample
+sizes (a_mu = 1, a_w = n + 2) for which this calibration holds. It plays the
+role of the weak Dirichlet prior a_jk = 1 of Triantafillou et al. (2021),
+though it is derived from one joint prior rather than set per conditional.
+The alternative a_w = n + 1, t = 2 is reported in the sensitivity analysis.
 """
 
 import itertools
@@ -80,8 +85,8 @@ BINARY_POSITIVE = {}
 
 # --- BGe hyperparameters (Normal-Wishart) ---
 A_MU = 1.0            # alpha_mu > 0
-A_W  = None           # alpha_w > n-1; None -> n + 1 (uniform marginal correlations)
-T_SCALE = None        # None -> t = 2 (prior mean precision 1 for each variable)
+A_W  = None           # alpha_w > n-1; None -> n + 2 (standard weak BGe, KMH 2014)
+T_SCALE = None        # None -> t = 1/2 (KMH supp Eq. B.6; bnlearn default)
 
 # --- search ---
 SEARCH_MODE = "greedy"          # "exhaustive" or "greedy"
@@ -203,14 +208,20 @@ def build_design(df, encoding=CATEGORICAL_ENCODING):
 # ===========================================================================
 
 def default_hyperparams(n, a_mu=A_MU, a_w=A_W, t_scale=T_SCALE):
-    """Default Normal-Wishart prior on n variables: a_w = n + 1, T = 2 I."""
+    """Standard weak BGe prior on n variables: a_w = n + 2, T = (1/2) I
+    (Kuipers, Moffa & Heckerman 2014, supplement Eq. B.6; bnlearn defaults)."""
     if a_w is None:
-        a_w = n + 1                       # uniform marginal correlations [BMM2000]
+        a_w = n + 2                       # standard weak BGe choice
     if a_w <= n - 1:
         raise ValueError(f"a_w must exceed n-1 = {n-1}; got {a_w}")
     nu = np.zeros(n)
     if t_scale is None:
-        t_scale = 2.0                     # E[1/Sigma_ii] = 2/t = 1
+        # t = a_mu (a_w - n - 1) / (a_mu + 1); with a_mu=1, a_w=n+2 -> t = 1/2
+        t_scale = a_mu * (a_w - n - 1) / (a_mu + 1)
+    if t_scale <= 0:
+        raise ValueError(
+            f"t_scale must be > 0; the calibration t = a_mu(a_w-n-1)/(a_mu+1) "
+            f"gives t <= 0 for a_w = {a_w}, a_mu = {a_mu}. Need a_w > n + 1.")
     T = t_scale * np.eye(n)
     return T, nu, a_mu, a_w
 
