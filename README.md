@@ -4,7 +4,7 @@ Python code for FindIMB (Triantafillou, Jabbari & Cooper, 2021) with a continuou
 
 ## Assumptions
 
-The BGe score assumes that all variables (outcome, treatment and covariates) are jointly Gaussian, and that the rows are i.i.d. draws from this distribution (each row is one independent case). Binary and categorical variables satisfy this only approximately. What the scores use is that `Y`, given the treatment and the covariate set, follows a linear model with Gaussian noise of constant variance. The treatment and covariates enter only as regressors.
+The BGe score assumes that all variables (outcome, treatment and covariates) are jointly Gaussian, and that the rows are i.i.d. draws from this distribution. Binary and categorical variables satisfy this only approximately. What the scores use is that `Y`, given the treatment and the covariate set, follows a linear model with Gaussian noise of constant variance. The treatment and covariates enter only as regressors.
 
 ## Files
 
