@@ -41,11 +41,16 @@ nodes U reachable from Z in the lattice (supersets of Z), with weights
 (m = number of covariate groups in MB \\ {X}). Without pruning the weights
 already sum to 1.
 
-PREDICTION (Bayesian model averaging over the visited Z and both hypotheses):
+PREDICTION (Bayesian model averaging over all Z and both hypotheses):
   p(y | x, MB, D) = sum_Z P(H_Z^c | D) p(y | x, Z, D_o u D_e)
                           + P(H_Z^cbar | D) p(y | x, Z, D_e),
-each term a Student-t posterior predictive; the point prediction is the
-same average of the predictive means.
+where each term is the posterior expectation of the conditional distribution 
+of Y given (X, Z): p(y | x, Z, D) = E[ N(y; b0 + b'(x, z), s2) | D ],
+taken over the posterior of (b0, b, s2) from D_o u D_e under H_Z^c and from
+D_e alone under H_Z^cbar (under H_Z^c, P(Y | do(X), Z) = P(Y | X, Z), so both
+datasets can be used). This expectation has a closed form, a Student-t
+density in y. The point prediction is the posterior expectation of the
+conditional mean, E[b0 + b'(x, z) | D], averaged with the same weights.
 --------------------
 BGe assumes all variables (outcome and covariates) are jointly Gaussian.
 
