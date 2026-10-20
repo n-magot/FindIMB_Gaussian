@@ -68,7 +68,7 @@ t = a_mu (a_w - n - 1) / (a_mu + 1) = 1/2, the smallest integer prior sample
 sizes (a_mu = 1, a_w = n + 2) for which this calibration holds. It plays the
 role of the weak Dirichlet prior a_jk = 1 of Triantafillou et al. (2021),
 though it is derived from one joint prior rather than set per conditional.
-The alternative a_w = n + 1, t = 2 is reported in the sensitivity analysis.
+The alternative a_w = n + 1, t = 2.
 
 nu = 0 is the D_o mean for EVERY dataset (not re-centred on the data being
 scored): re-centring would use D_e's own mean under H_Z^cbar and erase the
