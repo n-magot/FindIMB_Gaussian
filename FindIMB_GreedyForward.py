@@ -19,7 +19,7 @@ observational score log P(D_o | H_Z^o) = s(Y | P ; D_o).
 
 FORWARD SEARCH (as in the discrete FindIMB code):
   The search starts from Z = {} (parent set {X}) and proceeds layer by layer;
-  each kept node is expanded by adding one more covariate group. Every
+  each kept node is expanded by adding one more candidate variable (each nominal dummy is one). Every
   (parent, child) edge is recorded in a lattice, including edges into
   children that were already scored. After each layer the scores of all
   nodes visited so far are normalized: H^c and H^cbar jointly, H^o
@@ -38,7 +38,7 @@ P(D_o | H_Z^o) multiplies H_Z^c, and P(D_o | H_Z^obar) multiplies H_Z^cbar,
 where P(D_o | H_Z^obar) is the weighted average of P(D_o | H_U^o) over the
 nodes U reachable from Z in the lattice (supersets of Z), with weights
 1 / [C(m-|Z|, |U|-|Z|) (m-|Z|+1)] renormalized over the reachable nodes
-(m = number of covariate groups in MB \\ {X}). Without pruning the weights
+(m = number of candidate variables in MB \\ {X}). Without pruning the weights
 already sum to 1.
 
 PREDICTION (Bayesian model averaging over all Z and both hypotheses):
@@ -53,6 +53,20 @@ density in y. The point prediction is the posterior expectation of the
 conditional mean, E[b0 + b'(x, z) | D], averaged with the same weights.
 --------------------
 BGe assumes all variables (outcome and covariates) are jointly Gaussian.
+
+TWO MODELS (COEFFICIENTS)
+-------------------------
+  'shared' : one joint Gaussian of (X dummies, Z, Y); the treatment shifts
+             the intercept, the coefficients of Z and the noise variance are
+             shared by all arms.
+  'by_arm' : X is not a column; it splits the rows into arms, and within
+             each arm x, (Z, Y) is jointly Gaussian with its own, independent
+             Normal-Wishart prior. Every score is the sum over arms of the
+             local BGe score on that arm's rows (an arm with no rows adds 0),
+                 s(Y | Z ; D) = sum_x s(Y | Z ; D_x),
+             the set Z is shared by all arms, and H_Z^c states that every arm
+             is invariant between D_o and D_e. A case with treatment x is
+             predicted with arm x's posterior. Needs a binary or nominal X.
 
 THE PRIOR (weakly informative Normal-Wishart)
 ---------------------------------------------
@@ -97,6 +111,7 @@ TEST_PATH = None                           # optional: new cases to predict
 OUTCOME_COL = "Y"                           # <-- EDIT: the continuous outcome
 TREATMENT_COL = "X"                         # <-- EDIT: the treatment
 TREATMENT_TYPE = "binary"                   # "binary", "nominal" or "continuous"
+COEFFICIENTS = "shared"                     # "shared" or "by_arm" (by_arm: binary/nominal X only)
 
 # Markov boundary covariates (without X), e.g. from the MB search
 MB_NOMINAL_COLS = [
@@ -124,7 +139,7 @@ T_SCALE = None        # None -> t = 1/2 (KMH supp Eq. B.6)
 
 # --- hypotheses ---
 P_HC = 0.5            # prior mass on H^c (spread uniformly over Z); H^cbar gets 1 - P_HC
-USE_OBS_TERM = False  # True: include P(D_o | H_Z^o), P(D_o | H_Z^obar) (Eq. 3)
+USE_OBS_TERM = True   # True: include P(D_o | H_Z^o), P(D_o | H_Z^obar) (Eq. 3)
 
 # --- forward search ---
 THRESHOLD = 0.1       # expand a node if any normalized score exceeds this; < 0 -> exhaustive
@@ -167,8 +182,8 @@ def resolve_binary_positive(pooled, col):
 
 
 def encode_group(pooled, col, kind):
-    """Numeric (N, k) block for one variable (a nominal variable is one group
-    of L-1 dummy columns, added to / removed from parent sets as a unit)."""
+    """Numeric (N, k) block for one variable (used for the treatment; a
+    nominal treatment gives L-1 dummy columns that are always in P together)."""
     if kind == "nominal":
         ref = resolve_nominal_ref(pooled, col)
         levels = [l for l in sorted(pooled[col].unique()) if l != ref]
@@ -185,9 +200,11 @@ def build_data(df_o, df_e, df_test=None):
     """
     Returns standardized matrices D_o, D_e (and D_test), the column layout
     `cols` (group name -> column indices; "__Y__" and "__X__" for the outcome
-    and treatment) and the outcome back-transform.
+    and treatment; "__X__" is empty with COEFFICIENTS = 'by_arm'), the
+    outcome back-transform, the arm index of every row of D_o, D_e and D_test
+    (all 0 with 'shared') and the arm labels.
 
-    Standardization constants (mean, sd) and the log1p decision use D_o ONLY,
+    Standardization constants (mean, sd) use D_o ONLY,
     and the same transformation is applied to D_e and the test set. H_Z^c
     assumes P(Y | X, Z) is the same in D_o and D_e, which a common affine
     transformation preserves; estimating the transformation on D_e too, or
@@ -200,18 +217,28 @@ def build_data(df_o, df_e, df_test=None):
     parts = [df_o, df_e] + ([df_test] if df_test is not None else [])
     pooled = pd.concat(parts, ignore_index=True)
 
-    # outcome: skew check on D_o only -> log1p if strongly right-skewed
-    y_raw = pooled[OUTCOME_COL].astype(float)
-    y_obs = y_raw.iloc[:N_o]
-    log_y = bool(y_obs.skew() > 1.0 and (y_raw >= 0).all())
-    if log_y:
-        print(f"NOTE: D_o outcome skew = {y_obs.skew():.2f} > 1 -> applying log1p.")
-    y = np.log1p(y_raw.values) if log_y else y_raw.values
+    y = pooled[OUTCOME_COL].astype(float).values      # outcome used as it is
 
-    blocks = [("__Y__", y.reshape(-1, 1)),
-              ("__X__", encode_group(pooled, TREATMENT_COL, TREATMENT_TYPE))]
+    if COEFFICIENTS == "by_arm":
+        if TREATMENT_TYPE == "continuous":
+            raise ValueError("COEFFICIENTS = 'by_arm' needs a binary or nominal treatment")
+        levels = sorted(pooled[TREATMENT_COL].unique())
+        arm = pooled[TREATMENT_COL].map({l: i for i, l in enumerate(levels)}).values
+        blocks = [("__Y__", y.reshape(-1, 1))]        # X splits the rows, not a column
+    elif COEFFICIENTS == "shared":
+        levels, arm = [None], np.zeros(len(pooled), dtype=int)
+        blocks = [("__Y__", y.reshape(-1, 1)),
+                  ("__X__", encode_group(pooled, TREATMENT_COL, TREATMENT_TYPE))]
+    else:
+        raise ValueError("COEFFICIENTS must be 'shared' or 'by_arm'")
+    # nominal covariates: each of the L-1 dummies is its own candidate
+    # variable, <column>_<level>, added to / removed from Z on its own
     for col in MB_NOMINAL_COLS:
-        blocks.append((col, encode_group(pooled, col, "nominal")))
+        ref = resolve_nominal_ref(pooled, col)
+        for l in sorted(pooled[col].unique()):
+            if l != ref:
+                blocks.append((f"{col}_{l}",
+                               (pooled[col] == l).astype(float).values.reshape(-1, 1)))
     for col in MB_BINARY_COLS:
         blocks.append((col, encode_group(pooled, col, "binary")))
     for col in MB_CONTINUOUS_COLS:
@@ -227,10 +254,13 @@ def build_data(df_o, df_e, df_test=None):
     for name, b in blocks:
         cols[name] = list(range(c, c + b.shape[1]))
         c += b.shape[1]
+    cols.setdefault("__X__", [])
 
-    y_transform = {"mean": mean[0], "sd": sd[0], "log1p": log_y}
+    y_transform = {"mean": mean[0], "sd": sd[0]}
     D_test = Z[n_train:] if df_test is not None else None
-    return Z[:N_o], Z[N_o:n_train], cols, y_transform, D_test
+    arm_test = arm[n_train:] if df_test is not None else None
+    return (Z[:N_o], Z[N_o:n_train], cols, y_transform, D_test,
+            arm[:N_o], arm[N_o:n_train], arm_test, levels)
 
 
 # ===========================================================================
@@ -268,6 +298,8 @@ class BGe:
     def posterior(self, data):
         """N, mu_N and R = T + S_N + (N a_mu/(N+a_mu)) (nu - xbar)(nu - xbar)^T."""
         N = data.shape[0]
+        if N == 0:                      # no rows (e.g. an empty arm): posterior = prior
+            return {"N": 0, "R": self.T.copy(), "mu_N": self.nu.copy()}
         xbar = data.mean(axis=0)
         centered = data - xbar
         diff = (self.nu - xbar).reshape(-1, 1)
@@ -296,6 +328,14 @@ class BGe:
     def score(self, post, y_col, par_cols):
         """BGe local score  s(Y | P ; D) = log p(d^{P u Y}) - log p(d^P)."""
         return self.log_marginal(post, par_cols + [y_col]) - self.log_marginal(post, par_cols)
+
+    def arm_posteriors(self, data, arm, K):
+        """One posterior per arm (a single one, all rows, with 'shared')."""
+        return [self.posterior(data[arm == k]) for k in range(K)]
+
+    def arm_score(self, posts, y_col, par_cols):
+        """sum_x s(Y | P ; D_x); an arm with no rows gives exactly 0."""
+        return sum(self.score(p, y_col, par_cols) for p in posts)
 
     def predictive_mean(self, post, y_col, par_cols, x_par):
         """E[Y | x_P, D] = mu_N[Y] + R[Y,P] R[P,P]^{-1} (x_P - mu_N[P])."""
@@ -345,8 +385,9 @@ class BGe:
 # 4. The two hypotheses, scored over a pruned forward search of Z
 # ===========================================================================
 
-def forward_search_hypotheses(bge, D_o, D_e, cols, threshold=THRESHOLD,
-                              p_hc=P_HC, use_obs_term=USE_OBS_TERM):
+def forward_search_hypotheses(bge, D_o, D_e, cols, arm_o, arm_e, K,
+                              threshold=THRESHOLD, p_hc=P_HC,
+                              use_obs_term=USE_OBS_TERM):
     """
     Pruned forward search over subsets Z of MB \\ {X} (as in the discrete
     FindIMB code), then the posterior over (Z, H_Z^c / H_Z^cbar).
@@ -363,10 +404,12 @@ def forward_search_hypotheses(bge, D_o, D_e, cols, threshold=THRESHOLD,
       [log_P_Do_given_HZo, log_P_Do_given_HZo_bar if use_obs_term]
       P_HZc, P_HZc_bar       posterior over the 2 x #visited hypotheses
       P_c_given_Z            P(H_Z^c | D) / (P(H_Z^c | D) + P(H_Z^cbar | D))
-    and the posteriors of D_o, D_e and D_o u D_e.
+    and the per-arm posteriors of D_o, D_e and D_o u D_e (K = 1 with 'shared').
     """
-    posts = {"o": bge.posterior(D_o), "e": bge.posterior(D_e),
-             "oe": bge.posterior(np.vstack([D_o, D_e]))}
+    posts = {"o": bge.arm_posteriors(D_o, arm_o, K),
+             "e": bge.arm_posteriors(D_e, arm_e, K),
+             "oe": bge.arm_posteriors(np.vstack([D_o, D_e]),
+                                      np.concatenate([arm_o, arm_e]), K)}
     y_col, x_cols = cols["__Y__"][0], cols["__X__"]
     covs = [g for g in cols if g not in ("__Y__", "__X__")]
     m = len(covs)
@@ -380,9 +423,9 @@ def forward_search_hypotheses(bge, D_o, D_e, cols, threshold=THRESHOLD,
 
     def score_node(Z):
         par = x_cols + [c for g in Z for c in cols[g]]
-        s_o = bge.score(posts["o"], y_col, par)
-        lp_c[Z] = bge.score(posts["oe"], y_col, par) - s_o
-        lp_cb[Z] = bge.score(posts["e"], y_col, par)
+        s_o = bge.arm_score(posts["o"], y_col, par)
+        lp_c[Z] = bge.arm_score(posts["oe"], y_col, par) - s_o
+        lp_cb[Z] = bge.arm_score(posts["e"], y_col, par)
         lp_o[Z] = s_o
         lattice[Z] = []
 
@@ -477,39 +520,44 @@ def forward_search_hypotheses(bge, D_o, D_e, cols, threshold=THRESHOLD,
 # 5. Prediction (Bayesian model averaging over Z and both hypotheses)
 # ===========================================================================
 
-def bma_predict(bge, res, posts, cols, D_new):
+def bma_predict(bge, res, posts, cols, D_new, arm_new):
     """
     For the rows of D_new (standardized, same layout as D_o / D_e) returns
       mean   : sum_Z P(H_Z^c|D) E[Y | x, Z, D_o u D_e] + P(H_Z^cbar|D) E[Y | x, Z, D_e]
-      logpdf : log of the same mixture of predictive densities at y
+      logpdf : log of the same mixture of Student-t predictive densities at y
                (only meaningful when D_new contains the outcome)
-    both on the standardized outcome scale.
+    both on the standardized outcome scale. Row i is predicted with the
+    posterior of its arm arm_new[i] (the single posterior with 'shared').
     """
     y_col, x_cols = cols["__Y__"][0], cols["__X__"]
     y = D_new[:, y_col]
-    mean = np.zeros(D_new.shape[0])
+    n_new = D_new.shape[0]
+    mean = np.zeros(n_new)
     terms = []
     for _, r in res.iterrows():
         par = x_cols + [c for g in r["Z"] for c in cols[g]]
-        x_par = D_new[:, par]
-        for w, post in [(r["P_HZc"], posts["oe"]), (r["P_HZc_bar"], posts["e"])]:
-            mean += w * bge.predictive_mean(post, y_col, par, x_par)
-            terms.append(np.log(w + 1e-300) + bge.predictive_logpdf(post, y_col, par, x_par, y))
+        for w, key in [(r["P_HZc"], "oe"), (r["P_HZc_bar"], "e")]:
+            m_t, lp_t = np.zeros(n_new), np.zeros(n_new)
+            for k, post in enumerate(posts[key]):
+                rows = arm_new == k
+                if not rows.any():
+                    continue
+                x_par = D_new[np.ix_(rows, par)]
+                m_t[rows] = bge.predictive_mean(post, y_col, par, x_par)
+                lp_t[rows] = bge.predictive_logpdf(post, y_col, par, x_par, y[rows])
+            mean += w * m_t
+            terms.append(np.log(w + 1e-300) + lp_t)
     return mean, logsumexp(np.vstack(terms), axis=0)
 
 
 def to_outcome_scale(pred_z, y_transform):
-    """Undo the standardization (and log1p, if applied) of the outcome."""
-    y = pred_z * y_transform["sd"] + y_transform["mean"]
-    return np.expm1(y) if y_transform["log1p"] else y
+    """Undo the standardization of the outcome."""
+    return pred_z * y_transform["sd"] + y_transform["mean"]
 
 
-def to_outcome_logpdf(logpdf_z, y_orig, y_transform):
-    """Log density on the original outcome scale (Jacobian of the transforms)."""
-    out = logpdf_z - np.log(y_transform["sd"])
-    if y_transform["log1p"]:
-        out = out - np.log1p(np.asarray(y_orig, dtype=float))
-    return out
+def to_outcome_logpdf(logpdf_z, y_transform):
+    """Log density on the original outcome scale (Jacobian 1/sd)."""
+    return logpdf_z - np.log(y_transform["sd"])
 
 
 # ===========================================================================
@@ -519,25 +567,39 @@ def to_outcome_logpdf(logpdf_z, y_orig, y_transform):
 def main():
     df_o, df_e = load_data(OBS_PATH), load_data(EXP_PATH)
     df_t = load_data(TEST_PATH) if TEST_PATH else None
-    D_o, D_e, cols, y_transform, D_t = build_data(df_o, df_e, df_t)
-    bge = BGe(D_o.shape[1])
+    (D_o, D_e, cols, y_transform, D_t,
+     arm_o, arm_e, arm_t, levels) = build_data(df_o, df_e, df_t)
+    bge = BGe(D_o.shape[1])            # with 'by_arm': the same prior in every arm
+    K = len(levels)
 
     covs = [g for g in cols if g not in ("__Y__", "__X__")]
+    print(f"Model      : COEFFICIENTS = '{COEFFICIENTS}'")
+    if COEFFICIENTS == "by_arm":
+        cnt_o, cnt_e = np.bincount(arm_o, minlength=K), np.bincount(arm_e, minlength=K)
+        print(f"Rows per arm in D_o: {dict(zip(levels, cnt_o.tolist()))}")
+        print(f"Rows per arm in D_e: {dict(zip(levels, cnt_e.tolist()))}")
+        for l, co, ce in zip(levels, cnt_o, cnt_e):
+            if ce == 0:
+                print(f"WARNING: arm '{l}' has no rows in D_e: under H^cbar it is "
+                      f"predicted from the prior alone.")
+            elif co == 0:
+                print(f"NOTE: arm '{l}' has no rows in D_o: it adds the same score "
+                      f"s(D_e) to H^c and H^cbar.")
     print(f"Score      : BGe local scores  [Kuipers-Moffa-Heckerman 2014]")
     print(f"Hypotheses : H_Z^c, H_Z^cbar for subsets Z of MB \\ {{X}}, forward search "
           f"(threshold {THRESHOLD}; observational term: {USE_OBS_TERM})")
-    print(f"MB covariate groups ({len(covs)}): {covs}")
+    print(f"MB candidate variables ({len(covs)}): {covs}")
     print(f"N_o = {D_o.shape[0]}, N_e = {D_e.shape[0]}, n = {bge.n} columns")
     print(f"Prior: Normal-Wishart  a_mu={bge.a_mu}, a_w={bge.a_w}, T={bge.T[0, 0]:.4f}*I, "
           f"P(H^c) = {P_HC}")
 
-    res, posts = forward_search_hypotheses(bge, D_o, D_e, cols)
+    res, posts = forward_search_hypotheses(bge, D_o, D_e, cols, arm_o, arm_e, K)
     print(f"Visited {len(res)} of {2 ** len(covs)} subsets.")
     out = res.copy()
     out["Z"] = out["Z"].apply(lambda z: ", ".join(z) if z else "(empty)")
     out = out.sort_values("P_HZc", ascending=False)
     pd.set_option("display.width", 140)
-    print("\n=== Hypotheses (parent set = {X} u Z) ===")
+    print("\n=== Hypotheses (parent set = {X} u Z; by_arm: Z within each arm) ===")
     print(out.round(4).to_string(index=False))
     print(f"\nTotal P(H^c) = {res['P_HZc'].sum():.3f}   "
           f"Total P(H^cbar) = {res['P_HZc_bar'].sum():.3f}")
@@ -545,12 +607,12 @@ def main():
     print(f"Most probable H^c set: Z = {top['Z']}  (P = {top['P_HZc']:.3f})")
 
     if D_t is not None:
-        mean_z, lp_z = bma_predict(bge, res, posts, cols, D_t)
+        mean_z, lp_z = bma_predict(bge, res, posts, cols, D_t, arm_t)
         pred = to_outcome_scale(mean_z, y_transform)
         print(f"\nPredicted {len(pred)} test cases (BMA mean, original scale).")
         if OUTCOME_COL in df_t and df_t[OUTCOME_COL].notna().all():
             y = df_t[OUTCOME_COL].values.astype(float)
-            lp = to_outcome_logpdf(lp_z, y, y_transform)
+            lp = to_outcome_logpdf(lp_z, y_transform)
             print(f"Test RMSE = {np.sqrt(np.mean((y - pred) ** 2)):.4f}   "
                   f"mean log predictive density = {lp.mean():.4f}")
     return res
