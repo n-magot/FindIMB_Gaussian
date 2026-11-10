@@ -9,7 +9,7 @@ The BGe score assumes that all variables (outcome, treatment and covariates) are
 ## Files
 
 - **`Find_MarkovBoundary.py`**: finds the Markov boundary of the outcome `Y` in the observational data.
-- **`FindIMB_Gaussian.py`**: for each conditioning set `{X} u Z`, where `X` is the treatment and `Z` a subset of the other Markov boundary covariates, scores two hypotheses:
+- **`FindIMB_GreedyForward.py`**: an efficient, forward-stepping search. For each conditioning set `{X} u Z`, where `X` is the treatment and `Z` a subset of the other Markov boundary covariates, scores two hypotheses:
   - `H^c`: the observational and experimental data share `P(Y | X, Z)`, so they can be pooled;
   - `H^cbar`: they do not.
 
